@@ -3,6 +3,7 @@ Main application for Naruto Jutsu Hand Gesture Recognition
 """
 import cv2
 import numpy as np
+import platform
 from hand_detector import HandDetector
 from gesture_classifier import JutsuRecognizer
 from visual_effects import VisualEffects
@@ -20,13 +21,29 @@ class NarutoJutsuApp:
         
     def initialize_camera(self, camera_index=0):
         """Initialize camera"""
-        self.cap = cv2.VideoCapture(camera_index)
+        # AVFoundation is the native macOS camera backend. Explicitly using it
+        # avoids OpenCV trying an incompatible fallback backend.
+        backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
+        self.cap = cv2.VideoCapture(camera_index, backend)
         if not self.cap.isOpened():
-            raise Exception("Could not open camera")
+            raise RuntimeError(
+                "Could not open the camera. On macOS, enable Camera access for "
+                "the app launching Python (VS Code or Terminal) in "
+                "System Settings > Privacy & Security > Camera, then restart it."
+            )
         
         # Set camera properties
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+        # Fail early if the camera opens but cannot deliver frames.
+        ok, _ = self.cap.read()
+        if not ok:
+            self.cap.release()
+            raise RuntimeError(
+                "The camera opened but returned no frames. Check camera permissions "
+                "and make sure no other app is using it."
+            )
         
     def run(self):
         """Main application loop"""

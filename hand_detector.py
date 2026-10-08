@@ -4,6 +4,8 @@ Hand detection and landmark extraction using MediaPipe Tasks API
 import cv2
 import numpy as np
 import os
+import shutil
+import ssl
 import urllib.request
 
 try:
@@ -25,25 +27,44 @@ except Exception as e:
     )
 
 def download_hand_landmarker_model():
-    """Download the hand landmarker model if it doesn't exist"""
+    """Download the hand landmarker model if it doesn't exist."""
     model_dir = os.path.join(os.path.dirname(__file__), 'models')
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(model_dir, 'hand_landmarker.task')
-    
-    if not os.path.exists(model_path):
-        print("Downloading hand landmarker model...")
-        model_url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+
+    if os.path.exists(model_path):
+        return model_path
+
+    print("Downloading hand landmarker model...")
+    model_urls = [
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
+    ]
+    last_error = None
+
+    for model_url in model_urls:
         try:
-            urllib.request.urlretrieve(model_url, model_path)
-            print(f"Model downloaded to {model_path}")
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(model_url, context=ctx, timeout=30) as response:
+                with open(model_path, 'wb') as out_file:
+                    shutil.copyfileobj(response, out_file)
+
+            if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
+                print(f"Model downloaded to {model_path}")
+                return model_path
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to download model: {e}\n"
-                "Please download manually from: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task\n"
-                f"Save it to: {model_path}"
-            )
-    
-    return model_path
+            last_error = e
+            if os.path.exists(model_path):
+                try:
+                    os.remove(model_path)
+                except OSError:
+                    pass
+
+    raise RuntimeError(
+        f"Failed to download model: {last_error}\n"
+        "Please download manually from: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task\n"
+        f"Save it to: {model_path}"
+    )
 
 class HandDetector:
     def __init__(self, static_image_mode=False, max_num_hands=2, 
@@ -58,7 +79,12 @@ class HandDetector:
         model_path = download_hand_landmarker_model()
         
         # Create base options for hand landmarker with model path
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        # Force CPU inference on macOS. MediaPipe 1.x can initialize its
+        # Metal helper and abort the entire Python process on some systems.
+        base_options = python.BaseOptions(
+            model_asset_path=model_path,
+            delegate=python.BaseOptions.Delegate.CPU
+        )
         
         # Create hand landmarker options
         options = vision.HandLandmarkerOptions(
